@@ -68,15 +68,18 @@ def add_labels_to_df(qa_df, labels_dir):
   merged_df = pd.merge(qa_df, all_labels_df, on="participant_id", how="left")
   return merged_df
 
-def load_daic_data(data_dir="./daic_data/"):
+def load_daic_data(data_dir="./daic_data/", should_create_csv=False):
   transcripts_dir = os.path.join(data_dir, "transcripts")
   labels_dir = os.path.join(data_dir, "labels")
 
   qa_df = get_questions_answers_df(transcripts_dir)
   qa_df = add_labels_to_df(qa_df, labels_dir)
 
+  if should_create_csv:
+    qa_df.to_csv("questions_and_answers.csv", index=False, encoding="utf-8-sig")
+
   return qa_df
   
 
 if __name__ == "__main__":
-  load_daic_data()
+  load_daic_data(should_create_csv=True)
