@@ -48,11 +48,34 @@ def get_questions_answers_df(transcripts_dir):
 
   return df
 
+def add_labels_to_df(qa_df, labels_dir):
+  splits = ['train', 'dev', 'test']
+
+  all_labels_df = pd.DataFrame()
+  for split in splits:
+    split_labels_df = pd.read_csv(os.path.join(labels_dir, f"{split}.csv"))
+    split_labels_df = split_labels_df.rename(columns={
+      "Participant_ID": "participant_id",
+      "PHQ8_Binary": "depression_label",
+      "PHQ8_Score": "depression_severity",
+      "PHQ_Binary": "depression_label",
+      "PHQ_Score": "depression_severity",
+    })
+    split_labels_df = split_labels_df[["participant_id", "depression_label", "depression_severity"]]
+    split_labels_df["split"] = split
+    all_labels_df = pd.concat([all_labels_df, split_labels_df], ignore_index=True)
+
+  merged_df = pd.merge(qa_df, all_labels_df, on="participant_id", how="left")
+  return merged_df
+
 def load_daic_data(data_dir="./daic_data/"):
   transcripts_dir = os.path.join(data_dir, "transcripts")
   labels_dir = os.path.join(data_dir, "labels")
 
   qa_df = get_questions_answers_df(transcripts_dir)
+  qa_df = add_labels_to_df(qa_df, labels_dir)
+
+  return qa_df
   
 
 if __name__ == "__main__":
