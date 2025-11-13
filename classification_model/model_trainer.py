@@ -1,23 +1,12 @@
-from copy import deepcopy
 import numpy as np
-import pandas as pd
-from transformers import (
-  Trainer, TrainingArguments, AutoTokenizer, AutoModel,
-  AutoModelForSequenceClassification, EarlyStoppingCallback,
-  TrainerCallback
-)
-from tensorflow.keras.utils import to_categorical
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.data import Dataset
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score, mean_squared_error, r2_score, confusion_matrix, root_mean_squared_error, mean_absolute_error
-from sklearn.model_selection import ParameterGrid
-from collections import Counter
+from transformers import Trainer, TrainingArguments, AutoTokenizer, AutoModel
+from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
 from peft import LoraConfig, get_peft_model
 
-model_name = "allenai/longformer-base-4096"
+MODEL_NAME = "allenai/longformer-base-4096"
 
 class TranscriptsDataset(Dataset):
   def __init__(self, dataframe, tokenizer, max_length=4096):
@@ -115,7 +104,7 @@ def evaluate_model(trainer, test_dataset):
   print(f"Test F1 Score: {f1:.4f}")
 
 def train_model(df):
-  tokenizer = AutoTokenizer.from_pretrained(model_name)
+  tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
   train_df = df[df['split'] == 'train'].reset_index(drop=True)
   val_df = df[df['split'] == 'validation'].reset_index(drop=True)
@@ -125,7 +114,7 @@ def train_model(df):
   val_dataset = TranscriptsDataset(val_df, tokenizer)
   test_dataset = TranscriptsDataset(test_df, tokenizer)
   
-  model = TextClassifier(model_name, num_labels=2)
+  model = TextClassifier(MODEL_NAME, num_labels=2)
 
   training_args = TrainingArguments(
     output_dir="./results",
