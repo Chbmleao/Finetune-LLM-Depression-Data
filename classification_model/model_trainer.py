@@ -1,0 +1,110 @@
+from copy import deepcopy
+import numpy as np
+import pandas as pd
+from transformers import (
+  Trainer, TrainingArguments, AutoTokenizer, AutoModel,
+  AutoModelForSequenceClassification, EarlyStoppingCallback,
+  TrainerCallback
+)
+from tensorflow.keras.utils import to_categorical
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import Dataset
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score, mean_squared_error, r2_score, confusion_matrix, root_mean_squared_error, mean_absolute_error
+from sklearn.model_selection import ParameterGrid
+from collections import Counter
+from peft import LoraConfig, get_peft_model
+
+model_name = "allenai/longformer-base-4096"
+
+class TranscriptsDataset(Dataset):
+  def __init__(self, dataframe, tokenizer, max_length=4096):
+    self.data = dataframe
+    self.tokenizer = tokenizer
+    self.max_length = max_length
+
+  def __len__(self):
+    return len(self.data)
+
+  def __getitem__(self, idx):
+    text = str(self.data.iloc[idx]["text"])
+    label = int(self.data.iloc[idx]["depression_label"])
+
+    encoding = self.tokenizer(
+      text,
+      truncation=True,
+      padding="max_length",
+      max_length=self.max_length,
+      return_tensors="pt"
+    )
+
+    return {
+      "input_ids": encoding["input_ids"].squeeze(),
+      "attention_mask": encoding["attention_mask"].squeeze(),
+      "labels": torch.tensor(label, dtype=torch.long),
+    }
+  
+class TextFeaturizer(nn.Module):
+  def __init__(self, model_name, dropout=0.5, dense_size=256,
+               lora_r=8, lora_alpha=16, lora_dropout=0.1):
+    super().__init__() 
+
+    # Load Longformer encoder 
+    self.encoder = AutoModel.from_pretrained(model_name)
+    hidden_size = self.encoder.config.hidden_size
+
+    self.projection = nn.Sequential(
+      nn.Linear(hidden_size, dense_size),
+      nn.ReLU(),
+      nn.Dropout(dropout)
+    )
+
+    lora_config = LoraConfig(
+      r=lora_r,
+      lora_alpha=lora_alpha,
+      target_modules=["query", "value"],
+      lora_dropout=lora_dropout,
+      bias="none",
+      task_type="FEATURE_EXTRACTION"
+    )
+    self.encoder = get_peft_model(self.encoder, lora_config)
+
+    for name, param in self.encoder.named_parameters():
+      if 'lora_' not in name:
+        param.requires_grad = False
+
+  def forward(self, input_ids, attention_mask):
+    outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
+    cls_token = outputs.last_hidden_state[:, 0]
+    return self.projection(cls_token)
+
+class TextClassifier(nn.Module):
+  def __init__(self, model_name, num_labels=2):
+    super().__init__()
+    self.featurizer = TextFeaturizer(model_name)
+    self.classifier = nn.Linear(256, num_labels)
+
+  def forward(self, input_ids, attention_mask, labels=None):
+    features = self.text_featurizer(input_ids, attention_mask)
+    logits = self.classifier(features)
+
+    if labels is not None:
+      loss_fn = nn.CrossEntropyLoss()
+      loss = loss_fn(logits, labels)
+      return {"loss": loss, "logits": logits}
+    return {"logits": logits}
+
+def train_model(df):
+  tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+  train_df = df[df['split'] == 'train'].reset_index(drop=True)
+  val_df = df[df['split'] == 'validation'].reset_index(drop=True)
+  test_df = df[df['split'] == 'test'].reset_index(drop=True)
+
+  train_dataset = TranscriptsDataset(train_df, tokenizer)
+  val_dataset = TranscriptsDataset(val_df, tokenizer)
+  test_dataset = TranscriptsDataset(test_df, tokenizer)
+  
+  model = TextClassifier(model_name, num_labels=2)
