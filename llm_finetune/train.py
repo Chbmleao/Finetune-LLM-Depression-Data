@@ -8,12 +8,12 @@ def get_tokenizer_and_early_model(model_name="TinyLlama/TinyLlama-1.1B-Chat-v1.0
   tokenizer = AutoTokenizer.from_pretrained(model_name)
   model = AutoModelForCausalLM.from_pretrained(
     model_name,
-    load_in_8bit=True,  # optional for memory efficiency
+    load_in_8bit=False,
     device_map="auto"
   )
   return tokenizer, model, model_name
 
-def get_lora_model():
+def get_lora_model(model):
   lora_config = LoraConfig(
     r=8, # rank
     lora_alpha=16,
@@ -38,7 +38,7 @@ def fine_tune_model(
     per_device_train_batch_size=2,
     gradient_accumulation_steps=4,
     warmup_steps=10,
-    max_steps=100, # increase for real training
+    max_steps=1000,
     learning_rate=2e-4,
     fp16=True,
     logging_steps=10,
@@ -57,19 +57,18 @@ def fine_tune_model(
   model.save_pretrained(output_dir)
   tokenizer.save_pretrained(output_dir)
 
+def use_tokenizer(tokenizer, text):
+  return tokenizer(text, truncation=True, padding='max_length', max_length=512)
 
 if __name__ == "__main__":
   print('Loading tokenizer and model...')
   tokenizer, model, model_name = get_tokenizer_and_early_model()
-  
-  def use_tokenizer(text):
-    return tokenizer(text, truncation=True, padding='max_length', max_length=512)
-  
+
   print('Loading dataset...')
-  dataset = load_daic_data(should_create_csv=False)
-  print('Tokenizing dataset...')
-  tokenized_datasets = dataset.map(use_tokenizer, batched=True)
+  tokenized_dataset = load_daic_data(tokenizer, should_create_csv=False)
+
   print('Getting LoRA model...')
-  model = get_lora_model()
+  model = get_lora_model(model)
+
   print('Fine-tuning model...')
-  fine_tune_model(model, tokenizer, tokenized_datasets)
+  fine_tune_model(model, tokenizer, tokenized_dataset)

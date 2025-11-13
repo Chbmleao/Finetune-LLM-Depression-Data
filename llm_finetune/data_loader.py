@@ -104,24 +104,50 @@ def format_input(df, row, n_context=3):
   return instruction + input_text
 
 class InstructionDataset(Dataset):
-  def __init__(self, dataframe):
-    dataframe = dataframe.sort_values(by=['participant_id', 'start_time']).reset_index(drop=True)
-    self.dataframe = dataframe
+  def __init__(self, dataframe, tokenizer, max_length=512):
+    dataframe = dataframe.sort_values(
+      by=['participant_id', 'start_time']
+    ).reset_index(drop=True)
+    
+    self.df = dataframe
+    self.tokenizer = tokenizer
+    self.max_length = max_length
 
-    self.texts = []
-    for _, row in self.dataframe.iterrows():
-      instruction_plus_input = format_input(dataframe, row)
-      response_text = f"\n\n### Response:\n{str(row.get('answer', '')).strip()} [END]"
-      full_text = instruction_plus_input + response_text
-      self.texts.append(full_text)
+    self.samples = []
 
-  def __getitem__(self, idx):
-    return self.texts[idx]
+    for _, row in self.df.iterrows():
+      instruction_plus_input = format_input(self.df, row)
+
+      response = str(row.get("answer", "")).strip()
+
+      full_text = (
+        f"### Instruction:\n{instruction_plus_input}\n\n"
+        f"### Response:\n{response} [END]"
+      )
+
+      self.samples.append(full_text)
 
   def __len__(self):
-    return len(self.texts)
+    return len(self.samples)
+  
+  def __getitem__(self, idx):
+    text = self.samples[idx]
+    encoding = self.tokenizer(
+      text,
+      truncation=True,
+      padding='max_length',
+      max_length=self.max_length,
+      return_tensors='pt'
+    )
+    input_ids = encoding['input_ids'].squeeze()
+    attention_mask = encoding['attention_mask'].squeeze()
 
-def load_daic_data(data_dir="./daic_data/", should_create_csv=False):
+    return {
+      'input_ids': input_ids,
+      'attention_mask': attention_mask
+    }
+
+def load_daic_data(tokenizer, data_dir="./daic_data/", should_create_csv=False):
   transcripts_dir = os.path.join(data_dir, "transcripts")
   labels_dir = os.path.join(data_dir, "labels")
 
@@ -131,11 +157,7 @@ def load_daic_data(data_dir="./daic_data/", should_create_csv=False):
   if should_create_csv:
     qa_df.to_csv("questions_and_answers.csv", index=False, encoding="utf-8-sig")
 
-  instruction_dataset = InstructionDataset(qa_df)
-  print(f"Loaded DAIC dataset with {len(instruction_dataset)} samples.")
-  print("Example sample:")
-  print(instruction_dataset[99])
-
+  instruction_dataset = InstructionDataset(qa_df, tokenizer)
   return instruction_dataset
   
 
