@@ -64,7 +64,7 @@ class TextFeaturizer(nn.Module):
     lora_config = LoraConfig(
       r=lora_r,
       lora_alpha=lora_alpha,
-      target_modules=["query", "value"],
+      target_modules=["query", "key", "value"],
       lora_dropout=lora_dropout,
       bias="none",
       task_type="FEATURE_EXTRACTION"
@@ -72,7 +72,7 @@ class TextFeaturizer(nn.Module):
     self.encoder = get_peft_model(self.encoder, lora_config)
 
     for name, param in self.encoder.named_parameters():
-      if 'lora_' not in name:
+      if 'lora' not in name:
         param.requires_grad = False
 
   def forward(self, input_ids, attention_mask):
@@ -87,7 +87,7 @@ class TextClassifier(nn.Module):
     self.classifier = nn.Linear(256, num_labels)
 
   def forward(self, input_ids, attention_mask, labels=None):
-    features = self.text_featurizer(input_ids, attention_mask)
+    features = self.featurizer(input_ids, attention_mask)
     logits = self.classifier(features)
 
     if labels is not None:
@@ -95,6 +95,24 @@ class TextClassifier(nn.Module):
       loss = loss_fn(logits, labels)
       return {"loss": loss, "logits": logits}
     return {"logits": logits}
+
+def evaluate_model(trainer, test_dataset):
+  predictions = trainer.predict(test_dataset)
+  preds = np.argmax(predictions.predictions, axis=1)
+  labels = predictions.label_ids
+
+  for label, pred in zip(labels, preds):
+    print(f"True: {label}, Predicted: {pred}")
+
+  accuracy = accuracy_score(labels, preds)
+  precision = precision_score(labels, preds)
+  recall = recall_score(labels, preds)
+  f1 = f1_score(labels, preds)
+
+  print(f"Test Accuracy: {accuracy:.4f}")
+  print(f"Test Precision: {precision:.4f}")
+  print(f"Test Recall: {recall:.4f}")
+  print(f"Test F1 Score: {f1:.4f}")
 
 def train_model(df):
   tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -108,3 +126,24 @@ def train_model(df):
   test_dataset = TranscriptsDataset(test_df, tokenizer)
   
   model = TextClassifier(model_name, num_labels=2)
+
+  training_args = TrainingArguments(
+    output_dir="./results",
+    eval_strategy="epoch",
+    learning_rate=2e-5,
+    per_device_train_batch_size=1,
+    per_device_eval_batch_size=1,
+    num_train_epochs=10,
+    gradient_accumulation_steps=4,
+    fp16=True,
+  )
+
+  trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_dataset,
+    eval_dataset=val_dataset,
+  )
+  trainer.train()
+
+  evaluate_model(trainer, test_dataset)
